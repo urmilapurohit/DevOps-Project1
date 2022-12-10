@@ -1,0 +1,246 @@
+vim vpc1.yml
+
+## Creating VPC
+
+- name: creating AWS envrionment
+  hosts: localhost
+  tasks:
+    - name: Create vpc
+      ec2_vpc_net:
+        name: vpc1
+        cidr_block: 10.0.0.0/16
+        region: ap-south-1
+          #tenancy: dedicated
+    - name: Create vpc
+      ec2_vpc_net:
+        name: vpc2
+        cidr_block: 20.0.0.0/16
+        region: ap-south-1  
+          #   tenancy: dedicated
+
+
+
+
+subnet(2)
+## creayting subnets for VPC1 and VPC2
+
+- name: creating subnet
+  hosts: localhost
+  vars_files:
+    - myvar
+  tasks:
+    - name: Create subnet for vpc1
+      ec2_vpc_subnet:
+        state: present
+        vpc_id: "{{ vpc1 }}" #vpc-0f7173e248dac5328
+        region: ap-south-1
+        cidr: 10.0.1.0/24
+        tags:
+            Name: vpc1_public
+
+    - name: Create subnet for vpc1
+      ec2_vpc_subnet:
+          state: present      
+          vpc_id: "{{ vpc1 }}" #vpc-0f7173e248dac5328
+          region: ap-south-1
+          cidr: 10.0.2.0/24
+          tags:
+             Name: vpc1_private 
+  
+    
+    - name: Create subnet for vpc2
+      ec2_vpc_subnet:
+        state: present
+        vpc_id: "{{ vpc2 }}"  #vvpc-0783933f2545065b1
+        region: ap-south-1
+        cidr: 20.0.1.0/24
+        tags:
+            Name: vpc2_public
+
+    - name: Create subnet for vpc2
+      ec2_vpc_subnet:
+          state: present
+          vpc_id: "{{ vpc2 }}"  #vpc-0783933f2545065b1
+          region: ap-south-1
+          cidr: 20.0.2.0/24
+          tags:
+             Name: vpc2_private    
+             
+## creating INTERNAT GATWAY for VPC1 and VPC2           
+
+    - name: create internet_gatway
+      ec2_vpc_igw:
+        # name: vpc1
+        vpc_id: "{{ vpc1 }}" #vpc1
+        state: present
+        region: ap-south-1 
+        tags:
+          name: vpc1 
+      register: igw
+
+    - name: create internet_gatway
+      ec2_vpc_igw:
+        #name: vpc2
+         vpc_id: "{{ vpc2 }}" #vpc2
+         state: present
+         region: ap-south-1
+         tags:
+           name: vpc2
+      register: igw   
+
+
+
+natgatway(3)
+
+- name: create natgatway
+  hosts: localhost
+  vars_files:
+    - myvar
+  tasks:  
+  - name: Create new nat gateway with client token.
+    ec2_vpc_nat_gateway:
+      state: present
+      subnet_id: "{{ vpc1_sub_pub }}" #in_vpc1
+      allocation_id: eipalloc-04d8c372ff2330e33
+      region: ap-south-1
+
+
+
+routetable(4)
+
+- name: create route table
+  hosts: localhost
+  tasks:
+  vars_files:
+       - myvar
+  tasks:
+    - name: Set up public subnet route table for vpc1
+      ec2_vpc_route_table:
+        vpc_id: "{{ vpc1 }}"
+        region: ap-south-1
+        subnets:
+          - "{{ vpc1_sub_pub }}"
+        routes:
+          - dest: 0.0.0.0/0
+            gateway_id: "{{ igw1 }}"
+        tags:
+          Name: Rt-vpc1-pub
+
+    - name: Set up private subnet route table for vpc1
+      ec2_vpc_route_table:
+        vpc_id: "{{ vpc1 }}"
+        region: ap-south-1
+        subnets:
+          - "{{ vpc1_sub_priv }}"
+        routes:
+            - dest: 0.0.0.0/0
+              nat_gateway_id: nat-025085d20795cf5ff  #nat_id 
+        tags:
+          Name: Rt-vpc1-priv
+
+    - name: Set up public subnet route table for vpc2
+      ec2_vpc_route_table:
+        vpc_id: "{{ vpc2 }}"
+        region: ap-south-1
+        subnets:
+          - "{{ vpc1_sub_pub }}"
+        routes:
+          - dest: 0.0.0.0/0
+            gateway_id: "{{ igw2 }}"
+        tags:
+          Name: rt-vpc2-pub
+
+     - name: Set up private subnet route table for vpc2
+      ec2_vpc_route_table:
+        vpc_id: "{{ vpc2 }}"
+        region: ap-south-1
+        subnets:
+          - "{{ vpc1_sub_priv }}"
+            # routes:
+            #- dest: 0.0.0.0/0
+            #gateway_id: "{{ igw2  }}"
+        tags:
+          Name: rt-vpc2-priv
+     
+
+
+ec2(5)
+
+    - name: creating EC2 instance in vpc1 public
+  hosts: localhost
+  vars_files:
+    - myvar
+  tasks:
+  - name: Create EC2 server 1
+    ec2:
+       image: ami-0e6329e222e662a52
+       wait: yes
+       instance_type: t2.micro
+       region: ap-south-1
+       group_id: sg-0a819504399773255
+       vpc_subnet_id: "{{ vpc1_sub_pub }}"
+       assign_public_ip: yes
+       key_name: AWS_mumbai_key_pair
+       count_tag:
+         Name: vpc1-pub
+
+     - name: Create EC2 server 2
+    ec2:
+       image: ami-0e6329e222e662a52
+       wait: yes
+       instance_type: t2.micro
+       region: ap-south-1
+       group_id: sg-0a819504399773255
+       vpc_subnet_id: "{{ vpc1_sub_priv }}"
+       assign_public_ip: no
+       key_name: AWS_mumbai_key_pair
+       count_tag:
+         Name: vpc1-priv
+
+     - name: Create EC2 server 3
+    ec2:
+       image: ami-0e6329e222e662a52
+       wait: yes
+       instance_type: t2.micro
+       region: ap-south-1a
+       group_id: sg-06410dc6bad523b9a
+       vpc_subnet_id: "{{ vpc2_sub_pub }}"
+       assign_public_ip: yes
+       key_name: AWS_mumbai_key_pair
+       count_tag:
+         Name: vpc2-pub
+
+
+  - name: Create EC2 server 4
+    ec2:
+       image: ami-0e6329e222e662a52
+       wait: yes
+       instance_type: t2.micro
+       region: ap-south-1a
+       group_id: sg-06410dc6bad523b9a
+       vpc_subnet_id: "{{ vpc2_sub_priv }}"
+       assign_public_ip: no
+       key_name: AWS_mumbai_key_pair
+       count_tag:
+         Name: dodododod
+
+
+
+********************************************************************************************************
+
+
+myvar
+
+vpc1: vpc-0a23bbf3d9bbbd27f
+vpc2: vpc-02504518f74973d3f
+
+
+#for routetable3
+vpc1_sub_pub: subnet-08a1b053cc84b6d55
+vpc1_sub_priv: subnet-0335780bc33d80563
+vpc2_sub_pub: subnet-00cd461ec166c19f6
+vpc2_sub_priv: subnet-06279a32e81893c68
+
+igw1: igw-06b66a529fa424035
+igw2: igw-0debf7bbd28e878f2
+      
